@@ -37,13 +37,7 @@ wheels/
 secrets.json
 credentials.json
 
-# Data files (too large for git)
-data/raw/*.json
-data/raw/*.jsonl
-data/raw/*.csv
-data/processed/*.json
-data/processed/*.jsonl
-data/processed/*.csv
+# Data files - INCLUDED (collaborator needs them)
 
 # Model weights (too large for git)
 models/*.pt
