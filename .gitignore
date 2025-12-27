@@ -36,8 +36,10 @@ wheels/
 *_api_key.txt
 secrets.json
 credentials.json
+kaggle.json
 
 # Data files - INCLUDED (collaborator needs them)
+data/raw/temp_tifu/
 
 # Model weights (too large for git)
 models/*.pt
