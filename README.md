@@ -348,13 +348,36 @@ LIMIT 5;
 - Switch from pure random to weighted random selection
 - 80% exploit (use preferences), 20% explore (random)
 
-## Performance Targets
+## Evaluation Metrics
 
-- **Perplexity**: < 50 (coherent, natural language)
-- **Self-BLEU**: < 0.3 (diverse outputs)
-- **User Rating**: > 3.5/5 average (v1), > 4.0/5 (v2 with learning)
-- **Generation Latency**: < 5 seconds
-- **Variety**: Deduplication + random selection ensures different stories each day
+### Training-Time (During Fine-Tuning)
+
+| Metric | Target | Reasoning |
+|--------|--------|-----------|
+| **Validation Perplexity** | < 50 | Ensures fluent, coherent text |
+| **Validation Loss** | Decreasing | Detects overfitting |
+
+### Post-Training (Before Deployment)
+
+| Metric | Target | Reasoning |
+|--------|--------|-----------|
+| **Self-BLEU** | < 0.3 | Stories are different from each other |
+| **Length Accuracy** | >80% in range | Stories match target length (10-20 or 20-40 words) |
+
+### Production (v1 - After Launch)
+
+| Metric | Target | Reasoning |
+|--------|--------|-----------|
+| **User Rating** | > 3.5/5 | **PRIMARY METRIC.** Only thing that matters. |
+| **Deduplication Hit Rate** | < 10% | % regenerated due to similarity. Ensures variety. |
+
+### v2 Evaluation (Preference Learning)
+
+| Metric | Target | Reasoning |
+|--------|--------|-----------|
+| **User Rating (v2 vs v1)** | > 4.0/5 AND p < 0.05 | Only deploy v2 if statistically better than v1 (Independent Samples T-Test) |
+
+**Priority:** User ratings > Deduplication rate > Training diagnostics
 
 ## Development Roadmap
 
