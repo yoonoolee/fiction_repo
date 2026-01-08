@@ -8,7 +8,6 @@ from transformers import TrainingArguments
 from huggingface_hub import login
 
 # 1. SECURE CREDENTIAL LOADING
-# This part works both locally (.env) and on Kaggle (Secrets)
 if os.path.exists("/kaggle"):
     from kaggle_secrets import UserSecretsClient
     user_secrets = UserSecretsClient()
@@ -25,20 +24,26 @@ if not HF_TOKEN:
 
 login(token=HF_TOKEN)
 
-# 2. PATH CONFIGURATION
-# Detect if we are on Kaggle or local
+# 2. PATH CONFIGURATION (UPDATED FOR GITHUB DATA)
+# On Kaggle, the repo is cloned into /kaggle/working/fiction_repo
 if os.path.exists("/kaggle"):
-    # Look in the input folder for your dataset
-    input_dirs = [d for d in os.listdir("/kaggle/input") if os.path.isdir(f"/kaggle/input/{d}")]
-    # This picks the first dataset you attached
-    BASE_PATH = Path(f"/kaggle/input/{input_dirs[0]}")
-    print(f">>> Detected Kaggle dataset path: {BASE_PATH}")
+    BASE_PATH = Path("/kaggle/working/fiction_repo/data/train")
+    print(f">>> Kaggle Mode: Using data from repo: {BASE_PATH}")
 else:
+    # Local mode: relative to where you run the script
     BASE_PATH = Path("./data/train")
-    
+    print(f">>> Local Mode: Using data from: {BASE_PATH.absolute()}")
+
 def train_and_upload(dataset_name, output_name, num_epochs=1):
     print(f"\n>>> Starting Training: {output_name}")
     
+    # Verify file existence before starting heavy model load
+    train_file = BASE_PATH / f"{dataset_name}_train.jsonl"
+    val_file = BASE_PATH / f"{dataset_name}_val.jsonl"
+    
+    if not train_file.exists():
+        raise FileNotFoundError(f"Could not find dataset file: {train_file}")
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name = "unsloth/meta-llama-3.1-8b-bnb-4bit",
         max_seq_length = 2048,
@@ -55,10 +60,10 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         use_gradient_checkpointing = "unsloth",
     )
 
-    # Use the secure path we defined
+    # Loading the dataset from the GitHub repo path
     dataset = load_dataset('json', data_files={
-        'train': str(BASE_PATH / f"{dataset_name}_train.jsonl"),
-        'test': str(BASE_PATH / f"{dataset_name}_val.jsonl")
+        'train': str(train_file),
+        'test': str(val_file)
     })
 
     def format_prompts(examples):
