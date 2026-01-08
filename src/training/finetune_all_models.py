@@ -122,6 +122,10 @@ def finetune_model(dataset_name, output_name, num_epochs=3):
         task_type="CAUSAL_LM"
     )
     model = get_peft_model(model, lora_config)
+
+    # Enable gradient checkpointing for LoRA
+    model.enable_input_require_grads()
+
     model.print_trainable_parameters()
 
     # Load datasets
