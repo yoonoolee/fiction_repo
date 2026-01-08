@@ -37,11 +37,19 @@ from peft import LoraConfig, get_peft_model
 
 def get_base_dir():
     """Auto-detect base directory (works for local and lightning.ai)."""
-    # Check if running on lightning.ai
-    if os.path.exists("/teamspace/studios/this_studio"):
-        return Path("/teamspace/studios/this_studio")
-    # Otherwise use current directory
-    return Path.cwd()
+    cwd = Path.cwd()
+
+    # If we're in a git repo (has .git folder), use current directory
+    if (cwd / ".git").exists():
+        return cwd
+
+    # Check parent directories for .git
+    for parent in cwd.parents:
+        if (parent / ".git").exists():
+            return parent
+
+    # Fall back to current directory
+    return cwd
 
 
 # Configuration
