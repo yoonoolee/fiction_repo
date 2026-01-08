@@ -1,4 +1,5 @@
 from unsloth import FastLanguageModel
+from unsloth.chat_templates import get_chat_template 
 import torch
 import os
 from pathlib import Path
@@ -59,6 +60,8 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         bias = "none",
         use_gradient_checkpointing = "unsloth",
     )
+
+    tokenizer = get_chat_template(tokenizer, chat_template="llama-3.1")
 
     # Loading the dataset from the GitHub repo path
     dataset = load_dataset('json', data_files={
