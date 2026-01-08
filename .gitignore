@@ -75,3 +75,8 @@ wandb/
 # Temporary files
 *.tmp
 temp/
+.history/
+.Rhistory
+
+# Large raw data files (don't commit to GitHub)
+data/raw/*.parquet

@@ -289,10 +289,10 @@ def main():
     """Main scraping function"""
     scraper = scrape_all_tags()
 
-    # save 
-    output_path = RAW_DATA_DIR / "ao3_stories.csv"
+    # save
+    output_path = RAW_DATA_DIR / "ao3_stories.parquet"
     all_stories = pd.DataFrame(scraper.stories)
-    all_stories.to_csv(output_path, index=False)
+    all_stories.to_parquet(output_path, index=False)
 
 if __name__ == "__main__":
     main()
