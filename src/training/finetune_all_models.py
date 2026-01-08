@@ -27,13 +27,20 @@ login(token=HF_TOKEN)
 
 # 2. PATH CONFIGURATION
 # Detect if we are on Kaggle or local
-BASE_PATH = Path("/kaggle/input/your-dataset-name") if os.path.exists("/kaggle") else Path("./data/train")
-
+if os.path.exists("/kaggle"):
+    # Look in the input folder for your dataset
+    input_dirs = [d for d in os.listdir("/kaggle/input") if os.path.isdir(f"/kaggle/input/{d}")]
+    # This picks the first dataset you attached
+    BASE_PATH = Path(f"/kaggle/input/{input_dirs[0]}")
+    print(f">>> Detected Kaggle dataset path: {BASE_PATH}")
+else:
+    BASE_PATH = Path("./data/train")
+    
 def train_and_upload(dataset_name, output_name, num_epochs=1):
     print(f"\n>>> Starting Training: {output_name}")
     
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = "unsloth/Llama-3.2-8B-Instruct-bnb-4bit",
+        model_name = "unsloth/meta-llama-3.1-8b-bnb-4bit",
         max_seq_length = 2048,
         load_in_4bit = True,
     )
@@ -96,9 +103,9 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
 
 # List of models to run
 configs = [
-    ("one_liner", "llama-3.2-8b-one-liner", 3),
-    ("combined", "llama-3.2-8b-combined", 1),
-    ("short_story", "llama-3.2-8b-short-story", 1)
+    ("one_liner", "llama-3.1-8b-one-liner", 3),
+    ("combined", "llama-3.1-8b-combined", 1),
+    ("short_story", "llama-3.1-8b-short-story", 1)
 ]
 
 if __name__ == "__main__":
