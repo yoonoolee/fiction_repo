@@ -6,10 +6,9 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 from huggingface_hub import login
 
 # 1. SECURE CREDENTIAL LOADING
@@ -95,8 +94,8 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
 
     dataset = dataset.map(format_prompts, batched=True)
 
-    # Training arguments
-    training_args = TrainingArguments(
+    # SFT Training configuration (2026 API)
+    training_args = SFTConfig(
         output_dir="outputs",
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
@@ -109,6 +108,9 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         save_strategy="epoch",
         report_to="none",
         gradient_checkpointing=True,
+        # SFT-specific parameters
+        max_length=2048,  # Max sequence length for tokenization
+        dataset_text_field="text",  # Column name containing training text
     )
 
     # Trainer
@@ -116,7 +118,6 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         model=model,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
-        max_seq_length=2048,
         args=training_args,
         processing_class=tokenizer,
     )
