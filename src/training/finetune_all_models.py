@@ -116,7 +116,6 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         model=model,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
-        dataset_text_field="text",
         max_seq_length=2048,
         args=training_args,
         processing_class=tokenizer,
