@@ -1,11 +1,15 @@
-from unsloth import FastLanguageModel
-from unsloth.chat_templates import get_chat_template 
 import torch
 import os
 from pathlib import Path
 from datasets import load_dataset
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    TrainingArguments,
+)
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 from trl import SFTTrainer
-from transformers import TrainingArguments
 from huggingface_hub import login
 
 # 1. SECURE CREDENTIAL LOADING
@@ -25,89 +29,177 @@ if not HF_TOKEN:
 
 login(token=HF_TOKEN)
 
-# 2. PATH CONFIGURATION (UPDATED FOR GITHUB DATA)
-# On Kaggle, the repo is cloned into /kaggle/working/fiction_repo
+# 2. PATH CONFIGURATION
 if os.path.exists("/kaggle"):
     BASE_PATH = Path("/kaggle/working/fiction_repo/data/train")
     print(f">>> Kaggle Mode: Using data from repo: {BASE_PATH}")
 else:
-    # Local mode: relative to where you run the script
     BASE_PATH = Path("./data/train")
     print(f">>> Local Mode: Using data from: {BASE_PATH.absolute()}")
 
 def train_and_upload(dataset_name, output_name, num_epochs=1):
     print(f"\n>>> Starting Training: {output_name}")
-    
-    # Verify file existence before starting heavy model load
+
+    # Verify file existence
     train_file = BASE_PATH / f"{dataset_name}_train.jsonl"
     val_file = BASE_PATH / f"{dataset_name}_val.jsonl"
-    
+
     if not train_file.exists():
         raise FileNotFoundError(f"Could not find dataset file: {train_file}")
 
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name = "unsloth/meta-llama-3.1-8b-bnb-4bit",
-        max_seq_length = 2048,
-        load_in_4bit = True,
+    # 4-bit quantization config (fits on T4 GPU)
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16,
     )
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r = 16,
-        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-        lora_alpha = 32,
-        lora_dropout = 0,
-        bias = "none",
-        use_gradient_checkpointing = "unsloth",
+    # Load model with 4-bit quantization
+    model = AutoModelForCausalLM.from_pretrained(
+        "meta-llama/Llama-3.1-8B-Instruct",
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True,
     )
 
-    tokenizer = get_chat_template(tokenizer, chat_template="llama-3.1")
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.1-8B-Instruct")
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "right"
 
-    # Loading the dataset from the GitHub repo path
+    # Prepare model for k-bit training
+    model = prepare_model_for_kbit_training(model)
+
+    # LoRA config (same parameters as Unsloth version)
+    peft_config = LoraConfig(
+        r=16,
+        lora_alpha=32,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+        lora_dropout=0.0,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+
+    model = get_peft_model(model, peft_config)
+
+    # Load dataset
     dataset = load_dataset('json', data_files={
         'train': str(train_file),
         'test': str(val_file)
     })
 
     def format_prompts(examples):
-        texts = [tokenizer.apply_chat_template(convo, tokenize=False, add_generation_prompt=False) for convo in examples["messages"]]
-        return { "text" : texts }
+        texts = [tokenizer.apply_chat_template(convo, tokenize=False, add_generation_prompt=False)
+                 for convo in examples["messages"]]
+        return {"text": texts}
 
     dataset = dataset.map(format_prompts, batched=True)
 
-    trainer = SFTTrainer(
-        model = model,
-        tokenizer = tokenizer,
-        train_dataset = dataset["train"],
-        eval_dataset = dataset["test"],
-        dataset_text_field = "text",
-        max_seq_length = 2048,
-        args = TrainingArguments(
-            per_device_train_batch_size = 2,
-            gradient_accumulation_steps = 4,
-            num_train_epochs = num_epochs,
-            learning_rate = 2e-4,
-            fp16 = not torch.cuda.is_bf16_supported(),
-            bf16 = torch.cuda.is_bf16_supported(),
-            logging_steps = 10,
-            optim = "adamw_8bit",
-            output_dir = "outputs",
-            report_to = "none",
-        ),
+    # Training arguments
+    training_args = TrainingArguments(
+        output_dir="outputs",
+        per_device_train_batch_size=2,
+        gradient_accumulation_steps=4,
+        num_train_epochs=num_epochs,
+        learning_rate=2e-4,
+        fp16=not torch.cuda.is_bf16_supported(),
+        bf16=torch.cuda.is_bf16_supported(),
+        logging_steps=10,
+        optim="adamw_8bit",
+        save_strategy="epoch",
+        report_to="none",
+        gradient_checkpointing=True,
     )
+
+    # Trainer
+    trainer = SFTTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["test"],
+        dataset_text_field="text",
+        max_seq_length=2048,
+        args=training_args,
+    )
+
+    print(f">>> Training {output_name}...")
     trainer.train()
 
+    # Save LoRA adapters
+    print(f">>> Saving LoRA adapters to outputs/{output_name}")
+    model.save_pretrained(f"outputs/{output_name}")
+    tokenizer.save_pretrained(f"outputs/{output_name}")
+
+    # Upload LoRA adapters to HuggingFace
+    print(f">>> Uploading LoRA adapters to: {HF_USERNAME}/{output_name}")
+    model.push_to_hub(f"{HF_USERNAME}/{output_name}", token=HF_TOKEN)
+    tokenizer.push_to_hub(f"{HF_USERNAME}/{output_name}", token=HF_TOKEN)
+
     # GGUF Export for LM Studio
-    print(f">>> Exporting GGUF to Hugging Face...")
-    model.push_to_hub_gguf(
-        repo_id = f"{HF_USERNAME}/{output_name}-GGUF",
-        tokenizer = tokenizer,
-        quantization_method = "q4_k_m",
-        token = HF_TOKEN,
+    print(f">>> Merging LoRA adapters and exporting to GGUF...")
+
+    # Free up memory before merging
+    del trainer
+    torch.cuda.empty_cache()
+
+    # Load base model in 16-bit for merging (needs more memory temporarily)
+    print(">>> Loading base model for merging...")
+    base_model = AutoModelForCausalLM.from_pretrained(
+        "meta-llama/Llama-3.1-8B-Instruct",
+        torch_dtype=torch.float16,
+        device_map="auto",
     )
 
-    del model, tokenizer, trainer
+    # Load and merge LoRA adapters
+    print(">>> Merging LoRA adapters into base model...")
+    merged_model = PeftModel.from_pretrained(base_model, f"outputs/{output_name}")
+    merged_model = merged_model.merge_and_unload()
+
+    # Save merged model
+    merged_dir = f"outputs/{output_name}_merged"
+    print(f">>> Saving merged model to {merged_dir}")
+    merged_model.save_pretrained(merged_dir)
+    tokenizer.save_pretrained(merged_dir)
+
+    # Upload merged model to HuggingFace
+    print(f">>> Uploading merged model to: {HF_USERNAME}/{output_name}-merged")
+    merged_model.push_to_hub(f"{HF_USERNAME}/{output_name}-merged", token=HF_TOKEN)
+    tokenizer.push_to_hub(f"{HF_USERNAME}/{output_name}-merged", token=HF_TOKEN)
+
+    # Convert to GGUF using llama.cpp
+    print(f">>> Converting to GGUF format...")
+    try:
+        # Install llama-cpp-python if not available
+        import subprocess
+        subprocess.run(["pip", "install", "llama-cpp-python", "--quiet"], check=True)
+
+        # Convert to GGUF (q4_k_m quantization for LM Studio)
+        from llama_cpp import Llama
+
+        gguf_path = f"outputs/{output_name}.gguf"
+        print(f">>> Creating GGUF file: {gguf_path}")
+
+        # Use llama.cpp convert script
+        subprocess.run([
+            "python", "-m", "llama_cpp.convert",
+            merged_dir,
+            "--outfile", gguf_path,
+            "--outtype", "q4_k_m"
+        ], check=True)
+
+        print(f">>> GGUF export complete: {gguf_path}")
+        print(f">>> Note: Upload {gguf_path} to HuggingFace manually or use LM Studio locally")
+
+    except Exception as e:
+        print(f">>> GGUF conversion failed: {e}")
+        print(f">>> You can convert manually using llama.cpp later")
+        print(f">>> The merged model is available at: {HF_USERNAME}/{output_name}-merged")
+
+    # Clean up
+    del model, merged_model, base_model
     torch.cuda.empty_cache()
+
+    print(f">>> ✓ Completed: {output_name}")
 
 # List of models to run
 configs = [
@@ -119,3 +211,14 @@ configs = [
 if __name__ == "__main__":
     for d_name, o_name, epochs in configs:
         train_and_upload(d_name, o_name, epochs)
+
+    print("\n" + "="*50)
+    print("🎉 ALL MODELS COMPLETED!")
+    print("="*50)
+    print("\nYou now have:")
+    print("1. LoRA adapters on HuggingFace (for fine-tuning)")
+    print("2. Merged models on HuggingFace (for inference)")
+    print("3. GGUF files locally (for LM Studio)")
+    print("\nTo use in LM Studio:")
+    print("- Download the .gguf files from outputs/")
+    print("- Or pull the merged models from HuggingFace")
