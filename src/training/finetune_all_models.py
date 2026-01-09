@@ -1,5 +1,6 @@
 import torch
 import os
+import gc
 from pathlib import Path
 from datasets import load_dataset
 from transformers import (
@@ -38,6 +39,13 @@ else:
 
 def train_and_upload(dataset_name, output_name, num_epochs=1):
     print(f"\n>>> Starting Training: {output_name}")
+
+    # Aggressive memory cleanup before starting
+    gc.collect()
+    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        print(f">>> GPU Memory before training: {torch.cuda.memory_allocated() / 1024**3:.2f} GB allocated")
 
     # Verify file existence
     train_file = BASE_PATH / f"{dataset_name}_train.jsonl"
@@ -140,7 +148,11 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
 
     # Free up memory before merging
     del trainer
+    del model
+    gc.collect()
     torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
 
     # Load base model in 16-bit for merging (needs more memory temporarily)
     print(">>> Loading base model for merging...")
@@ -195,15 +207,19 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         print(f">>> You can convert manually using llama.cpp later")
         print(f">>> The merged model is available at: {HF_USERNAME}/{output_name}-merged")
 
-    # Clean up
-    del model, merged_model, base_model
+    # Aggressive cleanup after completion
+    del merged_model, base_model
+    gc.collect()
     torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        print(f">>> GPU Memory after cleanup: {torch.cuda.memory_allocated() / 1024**3:.2f} GB allocated")
 
     print(f">>> ✓ Completed: {output_name}")
 
 # List of models to run
 configs = [
-    ("one_liner", "llama-3.1-8b-one-liner", 3),
+    # ("one_liner", "llama-3.1-8b-one-liner", 3),  # Already completed
     ("combined", "llama-3.1-8b-combined", 1),
     ("short_story", "llama-3.1-8b-short-story", 1)
 ]
