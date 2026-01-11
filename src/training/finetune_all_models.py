@@ -113,7 +113,9 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         bf16=torch.cuda.is_bf16_supported(),
         logging_steps=10,
         optim="adamw_8bit",
-        save_strategy="epoch",
+        save_strategy="steps",
+        save_steps=200,  # Save checkpoint every 200 steps (~1.3 hours)
+        save_total_limit=2,  # Keep only the 2 most recent checkpoints to save space
         report_to="none",
         gradient_checkpointing=True,
         # SFT-specific parameters
@@ -131,7 +133,18 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
     )
 
     print(f">>> Training {output_name}...")
-    trainer.train()
+
+    # Check for existing checkpoint to resume from
+    checkpoint_dir = "outputs"
+    checkpoints = [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint-")] if os.path.exists(checkpoint_dir) else []
+    resume_from_checkpoint = None
+    if checkpoints:
+        # Get the latest checkpoint
+        latest_checkpoint = max(checkpoints, key=lambda x: int(x.split("-")[1]))
+        resume_from_checkpoint = os.path.join(checkpoint_dir, latest_checkpoint)
+        print(f">>> Resuming from checkpoint: {resume_from_checkpoint}")
+
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
     # Save LoRA adapters
     print(f">>> Saving LoRA adapters to outputs/{output_name}")
