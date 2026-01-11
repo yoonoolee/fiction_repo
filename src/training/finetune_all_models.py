@@ -7,10 +7,11 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    TrainerCallback,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 from trl import SFTTrainer, SFTConfig
-from huggingface_hub import login
+from huggingface_hub import login, HfApi
 
 # 1. SECURE CREDENTIAL LOADING
 if os.path.exists("/kaggle"):
@@ -28,6 +29,33 @@ if not HF_TOKEN:
     raise ValueError("HF_TOKEN not found! Check your .env file or Kaggle Secrets.")
 
 login(token=HF_TOKEN)
+
+# Callback to upload checkpoints to HuggingFace for persistence across Kaggle sessions
+class CheckpointUploadCallback(TrainerCallback):
+    def __init__(self, repo_id, token):
+        self.repo_id = repo_id
+        self.token = token
+        self.api = HfApi()
+
+    def on_save(self, args, state, control, **kwargs):
+        """Upload checkpoint to HuggingFace after each save"""
+        checkpoint_folder = f"checkpoint-{state.global_step}"
+        checkpoint_path = os.path.join(args.output_dir, checkpoint_folder)
+
+        if os.path.exists(checkpoint_path):
+            print(f">>> Uploading {checkpoint_folder} to HuggingFace: {self.repo_id}")
+            try:
+                self.api.upload_folder(
+                    folder_path=checkpoint_path,
+                    repo_id=self.repo_id,
+                    path_in_repo=checkpoint_folder,
+                    token=self.token,
+                    repo_type="model",
+                )
+                print(f">>> ✓ Checkpoint uploaded successfully")
+            except Exception as e:
+                print(f">>> ✗ Failed to upload checkpoint: {e}")
+        return control
 
 # 2. PATH CONFIGURATION
 if os.path.exists("/kaggle"):
@@ -123,13 +151,19 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         dataset_text_field="text",  # Column name containing training text
     )
 
-    # Trainer
+    # Trainer with checkpoint upload callback
+    checkpoint_callback = CheckpointUploadCallback(
+        repo_id=f"{HF_USERNAME}/{output_name}-checkpoints",
+        token=HF_TOKEN
+    )
+
     trainer = SFTTrainer(
         model=model,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
         args=training_args,
         processing_class=tokenizer,
+        callbacks=[checkpoint_callback],
     )
 
     print(f">>> Training {output_name}...")
@@ -138,11 +172,36 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
     checkpoint_dir = "outputs"
     checkpoints = [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint-")] if os.path.exists(checkpoint_dir) else []
     resume_from_checkpoint = None
+
+    # First, try to find local checkpoints
     if checkpoints:
-        # Get the latest checkpoint
         latest_checkpoint = max(checkpoints, key=lambda x: int(x.split("-")[1]))
         resume_from_checkpoint = os.path.join(checkpoint_dir, latest_checkpoint)
-        print(f">>> Resuming from checkpoint: {resume_from_checkpoint}")
+        print(f">>> Found local checkpoint: {resume_from_checkpoint}")
+    else:
+        # If no local checkpoints, try downloading from HuggingFace
+        print(f">>> No local checkpoints found. Checking HuggingFace for existing checkpoints...")
+        try:
+            from huggingface_hub import snapshot_download
+            checkpoint_repo = f"{HF_USERNAME}/{output_name}-checkpoints"
+
+            # Try to download the checkpoint repo
+            downloaded_path = snapshot_download(
+                repo_id=checkpoint_repo,
+                token=HF_TOKEN,
+                local_dir=checkpoint_dir,
+                repo_type="model",
+            )
+
+            # Check for checkpoints in downloaded path
+            checkpoints = [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint-")]
+            if checkpoints:
+                latest_checkpoint = max(checkpoints, key=lambda x: int(x.split("-")[1]))
+                resume_from_checkpoint = os.path.join(checkpoint_dir, latest_checkpoint)
+                print(f">>> Downloaded checkpoint from HuggingFace: {resume_from_checkpoint}")
+        except Exception as e:
+            print(f">>> No existing checkpoints on HuggingFace: {e}")
+            print(f">>> Starting training from scratch")
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
