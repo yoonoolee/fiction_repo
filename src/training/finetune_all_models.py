@@ -36,9 +36,25 @@ class CheckpointUploadCallback(TrainerCallback):
         self.repo_id = repo_id
         self.token = token
         self.api = HfApi()
+        self.repo_created = False
 
     def on_save(self, args, state, control, **kwargs):
         """Upload checkpoint to HuggingFace after each save"""
+        # Create repo on first save if it doesn't exist
+        if not self.repo_created:
+            try:
+                self.api.create_repo(
+                    repo_id=self.repo_id,
+                    token=self.token,
+                    repo_type="model",
+                    exist_ok=True,  # Don't error if repo already exists
+                )
+                print(f">>> ✓ Checkpoint repo ready: {self.repo_id}")
+                self.repo_created = True
+            except Exception as e:
+                print(f">>> ✗ Failed to create checkpoint repo: {e}")
+                return control
+
         checkpoint_folder = f"checkpoint-{state.global_step}"
         checkpoint_path = os.path.join(args.output_dir, checkpoint_folder)
 
