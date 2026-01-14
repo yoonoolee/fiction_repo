@@ -148,7 +148,7 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
 
     # SFT Training configuration (2026 API)
     training_args = SFTConfig(
-        output_dir="outputs",
+        output_dir=f"outputs/{output_name}",  # Unique dir per model
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
         num_train_epochs=num_epochs,
@@ -185,7 +185,7 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
     print(f">>> Training {output_name}...")
 
     # Check for existing checkpoint to resume from
-    checkpoint_dir = "outputs"
+    checkpoint_dir = f"outputs/{output_name}"
     checkpoints = [d for d in os.listdir(checkpoint_dir) if d.startswith("checkpoint-")] if os.path.exists(checkpoint_dir) else []
     resume_from_checkpoint = None
 
