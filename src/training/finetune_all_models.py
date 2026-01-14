@@ -308,7 +308,7 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
 # List of models to run
 configs = [
     # ("one_liner", "llama-3.1-8b-one-liner", 3),  # Already completed
-    ("combined", "llama-3.1-8b-combined", 1),
+    # ("combined", "llama-3.1-8b-combined", 1),  # Already completed
     ("short_story", "llama-3.1-8b-short-story", 1)
 ]
 
