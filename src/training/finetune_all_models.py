@@ -121,12 +121,12 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
     # Prepare model for k-bit training
     model = prepare_model_for_kbit_training(model)
 
-    # LoRA config (same parameters as Unsloth version)
+    # LoRA config - attention-only to reduce overfitting
     peft_config = LoraConfig(
         r=16,
         lora_alpha=32,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
-        lora_dropout=0.0,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        lora_dropout=0.05,
         bias="none",
         task_type="CAUSAL_LM",
     )
@@ -152,7 +152,7 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
         per_device_train_batch_size=2,
         gradient_accumulation_steps=4,
         num_train_epochs=num_epochs,
-        learning_rate=2e-4,
+        learning_rate=1e-4,
         fp16=not torch.cuda.is_bf16_supported(),
         bf16=torch.cuda.is_bf16_supported(),
         logging_steps=10,
@@ -307,9 +307,7 @@ def train_and_upload(dataset_name, output_name, num_epochs=1):
 
 # List of models to run
 configs = [
-    # ("one_liner", "llama-3.1-8b-one-liner", 3),  # Already completed
-    # ("combined", "llama-3.1-8b-combined", 1),  # Already completed
-    ("short_story", "llama-3.1-8b-short-story", 1)
+    ("combined", "llama-3.1-8b-combined-v2", 1),
 ]
 
 if __name__ == "__main__":
